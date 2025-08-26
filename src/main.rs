@@ -1,7 +1,9 @@
+use iced::widget::{Button, Column, Container, Row, Text, button};
+use iced::{
+    Alignment, Application, Command, Element, Length, Settings, Subscription, executor, keyboard,
+};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use iced::widget::{button, Button, Column, Container, Row, Text};
-use iced::{Alignment, Element, Length, Sandbox, Settings};
 
 fn main() -> iced::Result {
     Puzzle::run(Settings::default())
@@ -10,6 +12,7 @@ fn main() -> iced::Result {
 #[derive(Debug, Clone, Copy)]
 enum Message {
     TileClicked(usize, usize),
+    Move(Direction),
     NewGame,
 }
 
@@ -24,53 +27,85 @@ struct Puzzle {
     state: GameState,
 }
 
-impl Sandbox for Puzzle {
+impl Application for Puzzle {
     type Message = Message;
+    type Theme = iced::Theme;
+    type Executor = executor::Default;
+    type Flags = ();
 
-    fn new() -> Self {
+    fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
         let board = make_pazzle();
         let empty_pos = find_zero(&board).expect("Board must have a zero");
-        Puzzle {
-            board,
-            empty_pos,
-            state: GameState::Playing,
-        }
+        (
+            Puzzle {
+                board,
+                empty_pos,
+                state: GameState::Playing,
+            },
+            Command::none(),
+        )
     }
 
     fn title(&self) -> String {
         String::from("15 Puzzle")
     }
 
-    fn update(&mut self, message: Self::Message) {
-        match self.state {
-            GameState::Playing => match message {
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+        if let GameState::Playing = self.state {
+            match message {
                 Message::TileClicked(y, x) => {
                     let (ey, ex) = self.empty_pos;
-
-                    // クリックされたタイルが空白に隣接しているかチェック
                     let is_adjacent = (y == ey && (x as isize - ex as isize).abs() == 1)
                         || (x == ex && (y as isize - ey as isize).abs() == 1);
 
                     if is_adjacent {
-                        self.board[ey][ex] = self.board[y][x];
-                        self.board[y][x] = 0;
-                        self.empty_pos = (y, x);
+                        self.swap_with_empty(y, x);
+                    }
+                }
+                Message::Move(direction) => {
+                    let (ey, ex) = self.empty_pos;
+                    // ユーザーが動かしたいタイルの方向から、対象タイルの座標を計算
+                    let (dy, dx) = direction.opposite().delta();
+                    let source_y = ey as isize + dy;
+                    let source_x = ex as isize + dx;
 
-                        if self.board == SOLVED_PANEL {
-                            self.state = GameState::Solved;
-                        }
+                    // 盤面の範囲内なら移動を実行
+                    if source_y >= 0
+                        && source_y < BOARD_SIZE as isize
+                        && source_x >= 0
+                        && source_x < BOARD_SIZE as isize
+                    {
+                        self.swap_with_empty(source_y as usize, source_x as usize);
                     }
                 }
                 Message::NewGame => {
-                    *self = Self::new();
-                }
-            },
-            GameState::Solved => {
-                if let Message::NewGame = message {
-                    *self = Self::new();
+                    *self = Self::new(()).0;
                 }
             }
+        } else {
+            // GameState::Solved
+            if let Message::NewGame = message {
+                *self = Self::new(()).0;
+            }
         }
+        Command::none()
+    }
+
+    fn subscription(&self) -> Subscription<Self::Message> {
+        keyboard::on_key_press(|key, _modifiers| {
+            // `key`が名前付きのキー（矢印キーなど）の場合に`Direction`に変換する
+            if let keyboard::Key::Named(named_key) = key {
+                let direction = match named_key {
+                    keyboard::key::Named::ArrowUp => Some(Direction::Up),
+                    keyboard::key::Named::ArrowDown => Some(Direction::Down),
+                    keyboard::key::Named::ArrowLeft => Some(Direction::Left),
+                    keyboard::key::Named::ArrowRight => Some(Direction::Right),
+                    _ => None,
+                };
+                return direction.map(Message::Move);
+            }
+            None
+        })
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
@@ -116,6 +151,19 @@ impl Sandbox for Puzzle {
     }
 }
 
+impl Puzzle {
+    /// 指定された座標のタイルと空白タイルを入れ替える
+    fn swap_with_empty(&mut self, y: usize, x: usize) {
+        let (ey, ex) = self.empty_pos;
+        self.board[ey][ex] = self.board[y][x];
+        self.board[y][x] = 0;
+        self.empty_pos = (y, x);
+
+        if self.board == SOLVED_PANEL {
+            self.state = GameState::Solved;
+        }
+    }
+}
 /// パネル上の移動方向を示す列挙型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Direction {
@@ -148,7 +196,8 @@ impl Direction {
 }
 
 const BOARD_SIZE: usize = 4;
-const SOLVED_PANEL: [[i32; BOARD_SIZE]; BOARD_SIZE] = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 0]];
+const SOLVED_PANEL: [[i32; BOARD_SIZE]; BOARD_SIZE] =
+    [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 0]];
 
 fn make_pazzle() -> [[i32; BOARD_SIZE]; BOARD_SIZE] {
     let mut board = SOLVED_PANEL;
@@ -165,14 +214,23 @@ fn make_pazzle() -> [[i32; BOARD_SIZE]; BOARD_SIZE] {
     for _ in 0..1000 {
         // 1. 現在地から物理的に移動可能な方向をすべてリストアップする
         let mut possible_moves = Vec::new();
-        if empty_y > 0 { possible_moves.push(Direction::Up); } // 上に動ける
-        if empty_y < BOARD_SIZE - 1 { possible_moves.push(Direction::Down); } // 下に動ける
-        if empty_x > 0 { possible_moves.push(Direction::Left); } // 左に動ける
-        if empty_x < BOARD_SIZE - 1 { possible_moves.push(Direction::Right); } // 右に動ける
+        if empty_y > 0 {
+            possible_moves.push(Direction::Up);
+        } // 上に動ける
+        if empty_y < BOARD_SIZE - 1 {
+            possible_moves.push(Direction::Down);
+        } // 下に動ける
+        if empty_x > 0 {
+            possible_moves.push(Direction::Left);
+        } // 左に動ける
+        if empty_x < BOARD_SIZE - 1 {
+            possible_moves.push(Direction::Right);
+        } // 右に動ける
 
         // 2. 直前の動きと逆方向の動きを候補から除外する
         let opposite_of_last = last_move.map(|d| d.opposite());
-        let valid_moves: Vec<_> = possible_moves.into_iter()
+        let valid_moves: Vec<_> = possible_moves
+            .into_iter()
             .filter(|&dir| Some(dir) != opposite_of_last)
             .collect();
 
