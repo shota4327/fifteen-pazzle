@@ -1,10 +1,17 @@
-use iced::widget::{Button, Column, Container, Row, Text, button};
+use iced::widget::{button, image, Button, Column, Container, Image, Row, Text};
 use iced::{
     Alignment, Application, Command, Element, Length, Settings, Subscription, executor, keyboard,
 };
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::time::{Duration, Instant};
+use std::fs;
+use ::image::GenericImageView;
+use ::image::ImageError;
+use ::image::error::UnsupportedError;
+use ::image::error::ImageFormatHint;
+use ::image::error::UnsupportedErrorKind;
+use ::image::open;
 
 fn main() -> iced::Result {
     Puzzle::run(Settings::default())
@@ -27,6 +34,7 @@ struct Puzzle {
     empty_pos: (usize, usize),
     state: GameState,
     start_time: Instant,
+    tiles: Vec<image::Handle>,
 }
 
 impl Application for Puzzle {
@@ -38,12 +46,18 @@ impl Application for Puzzle {
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
         let board = make_pazzle();
         let empty_pos = find_zero(&board).expect("Board must have a zero");
+        let image_path = get_random_image_path("images")
+            .expect("Failed to get a random image from the 'images' directory. Make sure the directory exists and contains images.");
+        let tiles = load_and_slice_image(&image_path)
+            .unwrap_or_else(|e| panic!("Failed to load or slice image '{}': {}", image_path, e));
+
         (
             Puzzle {
                 board,
                 empty_pos,
                 state: GameState::Playing,
                 start_time: Instant::now(),
+                tiles,
             },
             Command::none(),
         )
@@ -114,15 +128,16 @@ impl Application for Puzzle {
     fn view(&self) -> Element<'_, Self::Message> {
         let board_view = (0..BOARD_SIZE).fold(Column::new().spacing(5), |col, y| {
             let row_view = (0..BOARD_SIZE).fold(Row::new().spacing(5), |row, x| {
-                let tile_content = self.board[y][x];
+                let tile_id = self.board[y][x] as usize;
 
-                let button = if tile_content == 0 {
+                let button = if tile_id == 0 {
                     // 空白タイルはボタンではないように見せる
                     button(Text::new("")).width(60).height(60)
                 } else {
-                    button(Text::new(tile_content.to_string()).size(24))
+                    button(Image::new(self.tiles[tile_id].clone()))
                         .width(60)
                         .height(60)
+                        .padding(0)
                         .on_press(Message::TileClicked(y, x))
                 };
                 row.push(button)
@@ -275,4 +290,67 @@ fn find_zero(panel: &[[i32; BOARD_SIZE]; BOARD_SIZE]) -> Option<(usize, usize)> 
         }
     }
     None
+}
+
+/// 画像を読み込み、パズルのタイルに分割する
+fn load_and_slice_image(path: &str) -> Result<Vec<image::Handle>, ImageError> {
+    let img = open(path)?;
+    let (width, height) = img.dimensions();
+
+    // 画像が正方形でない場合や、4で割り切れない場合はエラー
+    if width != height || width % (BOARD_SIZE as u32) != 0 {
+        return Err(ImageError::Unsupported(UnsupportedError::from_format_and_kind(
+            ImageFormatHint::Unknown,
+            UnsupportedErrorKind::GenericFeature(
+                "Image must be square and dimensions must be divisible by 4".to_string(),
+            ),
+        )));
+    }
+
+    let tile_size = width / (BOARD_SIZE as u32);
+    let mut tiles = vec![image::Handle::from_pixels(1, 1, vec![0, 0, 0, 0])]; // ID 0 はダミー
+
+    for id in 1..=(BOARD_SIZE * BOARD_SIZE - 1) {
+        let solved_pos = SOLVED_PANEL.iter().flatten().position(|&p| p == id as i32).unwrap();
+        let y = solved_pos / BOARD_SIZE;
+        let x = solved_pos % BOARD_SIZE;
+
+        let sub_img = img.view(x as u32 * tile_size, y as u32 * tile_size, tile_size, tile_size);
+        let rgba_img = sub_img.to_image();
+        let handle = image::Handle::from_pixels(tile_size, tile_size, rgba_img.into_raw());
+        tiles.push(handle);
+    }
+
+    Ok(tiles)
+}
+
+/// imagesフォルダからランダムな画像ファイルのパスを取得する
+fn get_random_image_path(dir: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let entries = fs::read_dir(dir)?
+        .filter_map(Result::ok) // ディレクトリ読み取りエラーは無視
+        .map(|e| e.path())
+        .collect::<Vec<_>>();
+
+    let image_paths: Vec<_> = entries
+        .into_iter()
+        .filter(|path| {
+            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                // 対応する画像形式の拡張子をチェック
+                matches!(ext.to_lowercase().as_str(), "png" | "jpg" | "jpeg" | "bmp")
+            } else {
+                false
+            }
+        })
+        .collect();
+
+    if image_paths.is_empty() {
+        return Err(format!("No valid images (.png, .jpg, .jpeg, .bmp) found in '{}' directory.", dir).into());
+    }
+
+    let mut rng = thread_rng();
+    // `choose`はOptionを返すので、`ok_or`でエラーに変換
+    let chosen_path = image_paths.choose(&mut rng)
+        .ok_or("Internal error: Failed to choose a random image from the list.")?;
+
+    Ok(chosen_path.to_str().ok_or("Path contains invalid UTF-8.")?.to_string())
 }

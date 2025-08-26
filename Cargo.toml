@@ -1,8 +1,9 @@
 [package]
 name = "fifteen-pazzle"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 rand = "0.8.5"
-iced = "0.12"
+iced = {version = "0.12", features = ["image"]}
+image = "0.25"
