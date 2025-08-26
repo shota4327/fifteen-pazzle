@@ -4,6 +4,7 @@ use iced::{
 };
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use std::time::{Duration, Instant};
 
 fn main() -> iced::Result {
     Puzzle::run(Settings::default())
@@ -18,13 +19,14 @@ enum Message {
 
 enum GameState {
     Playing,
-    Solved,
+    Solved(Duration),
 }
 
 struct Puzzle {
     board: [[i32; BOARD_SIZE]; BOARD_SIZE],
     empty_pos: (usize, usize),
     state: GameState,
+    start_time: Instant,
 }
 
 impl Application for Puzzle {
@@ -41,6 +43,7 @@ impl Application for Puzzle {
                 board,
                 empty_pos,
                 state: GameState::Playing,
+                start_time: Instant::now(),
             },
             Command::none(),
         )
@@ -132,8 +135,13 @@ impl Application for Puzzle {
             .spacing(20)
             .align_items(Alignment::Center);
 
-        if let GameState::Solved = self.state {
-            content = content.push(Text::new("Congratulations! You solved it!").size(28));
+        if let GameState::Solved(duration) = self.state {
+            let seconds = duration.as_secs();
+            let millis = duration.subsec_millis();
+            let time_str = format!("Clear Time: {:02}:{:02}.{:03}", seconds / 60, seconds % 60, millis);
+
+            content = content.push(Text::new("Congratulations! You solved it!").size(28))
+                             .push(Text::new(time_str).size(24));
         }
 
         content = content.push(
@@ -160,7 +168,8 @@ impl Puzzle {
         self.empty_pos = (y, x);
 
         if self.board == SOLVED_PANEL {
-            self.state = GameState::Solved;
+            let clear_time = self.start_time.elapsed();
+            self.state = GameState::Solved(clear_time);
         }
     }
 }
