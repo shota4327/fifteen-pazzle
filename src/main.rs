@@ -1,6 +1,85 @@
+use std::io::{self, Write};
+
 fn main() {
     let panel = make_pazzle();
-    show_panel(panel);
+    play_game(panel);
+}
+
+// ゲームをプレイするメインの関数
+fn play_game(mut panel: [[i32; 4]; 4]) {
+    loop {
+        println!("\n--- 15 Puzzle ---");
+        show_panel(panel);
+
+        if is_cleared(panel) {
+            println!("\nCongratulations! You solved the puzzle!");
+            break;
+        }
+
+        // 空白ピース(0)の現在位置を探す
+        let (y, x) = match find_zero(&panel) {
+            Some(pos) => pos,
+            None => {
+                println!("Error: Could not find the empty space. Exiting.");
+                break;
+            }
+        };
+
+        print!("\nMove piece (1:Up, 2:Down, 3:Left, 4:Right, 0:Quit): ");
+        // プロンプトをすぐ表示するためにflushする
+        io::stdout().flush().expect("flush failed!");
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line");
+
+        match input.trim().parse::<u32>() {
+            Ok(1) => { // 上へ: 空白ピースの下のピースを動かす
+                if y < 3 {
+                    let tmp = panel[y][x];
+                    panel[y][x] = panel[y + 1][x];
+                    panel[y + 1][x] = tmp;
+                } else {
+                    println!("-> Cannot move up.");
+                }
+            }
+            Ok(2) => { // 下へ: 空白ピースの上のピースを動かす
+                if y > 0 {
+                    let tmp = panel[y][x];
+                    panel[y][x] = panel[y - 1][x];
+                    panel[y - 1][x] = tmp;
+                } else {
+                    println!("-> Cannot move down.");
+                }
+            }
+            Ok(3) => { // 左へ: 空白ピースの右のピースを動かす
+                if x < 3 {
+                    let tmp = panel[y][x];
+                    panel[y][x] = panel[y][x + 1];
+                    panel[y][x + 1] = tmp;
+                } else {
+                    println!("-> Cannot move left.");
+                }
+            }
+            Ok(4) => { // 右へ: 空白ピースの左のピースを動かす
+                if x > 0 {
+                    let tmp = panel[y][x];
+                    panel[y][x] = panel[y][x - 1];
+                    panel[y][x - 1] = tmp;
+                } else {
+                    println!("-> Cannot move right.");
+                }
+            }
+            Ok(0) => {
+                println!("Quitting the game.");
+                break;
+            }
+            _ => {
+                println!("-> Invalid input. Please enter a number from 0 to 4.");
+            }
+        }
+    }
 }
 
 fn make_pazzle() -> [[i32; 4]; 4] {
@@ -70,4 +149,22 @@ fn show_panel(panel: [[i32; 4]; 4]) {
         }
         println!();
     }
+}
+
+// パネルから空白(0)の位置を探す
+fn find_zero(panel: &[[i32; 4]; 4]) -> Option<(usize, usize)> {
+    for y in 0..4 {
+        for x in 0..4 {
+            if panel[y][x] == 0 {
+                return Some((y, x));
+            }
+        }
+    }
+    None // 理論上ここには来ない
+}
+
+// パズルが完成したかチェックする
+fn is_cleared(panel: [[i32; 4]; 4]) -> bool {
+    let solved_panel: [[i32; 4]; 4] = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 0]];
+    panel == solved_panel
 }
